@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Grabador de Pantalla</title>
+<title>Grabador de Contenedor + Supabase</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <style>
   :root {
@@ -13,6 +14,7 @@
     --accent: #6c5ce7;
     --accent2: #00d4a4;
     --danger: #ff5c5c;
+    --warn: #f5b942;
     --text: #e8e8f0;
     --muted: #9497a8;
     --border: #2a2e40;
@@ -35,79 +37,28 @@
     align-items: center;
     gap: 12px;
   }
-  header h1 {
-    font-size: 18px;
-    margin: 0;
-    font-weight: 600;
-  }
-  .dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: var(--muted);
-  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
   .dot.recording { background: var(--danger); animation: pulse 1.2s infinite; }
   @keyframes pulse {
     0% { box-shadow: 0 0 0 0 rgba(255,92,92,0.6); }
     70% { box-shadow: 0 0 0 10px rgba(255,92,92,0); }
     100% { box-shadow: 0 0 0 0 rgba(255,92,92,0); }
   }
-  main {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 340px 1fr;
-    gap: 0;
-  }
-  @media (max-width: 800px) {
-    main { grid-template-columns: 1fr; }
-  }
-  .panel {
-    background: var(--panel);
-    padding: 20px;
-    border-right: 1px solid var(--border);
-    overflow-y: auto;
-  }
-  .section {
-    margin-bottom: 24px;
-  }
-  .section h2 {
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--muted);
-    margin: 0 0 12px 0;
-  }
-  label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    margin-bottom: 10px;
-    cursor: pointer;
-    color: var(--text);
-  }
-  input[type="checkbox"] {
-    width: 16px; height: 16px;
-    accent-color: var(--accent);
-  }
+  main { flex: 1; display: grid; grid-template-columns: 340px 1fr; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); padding: 20px; border-right: 1px solid var(--border); overflow-y: auto; }
+  .section { margin-bottom: 22px; }
+  .section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 0 0 12px 0; }
+  label { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 10px; cursor: pointer; }
+  input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
   input[type="text"], input[type="url"] {
-    width: 100%;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--panel2);
-    color: var(--text);
-    font-size: 14px;
-    margin-bottom: 10px;
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel2); color: var(--text); font-size: 14px; margin-bottom: 10px;
   }
   button {
-    border: none;
-    border-radius: 8px;
-    padding: 12px 16px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    width: 100%;
-    margin-bottom: 10px;
-    transition: opacity 0.2s, transform 0.1s;
+    border: none; border-radius: 8px; padding: 12px 16px; font-size: 14px; font-weight: 600;
+    cursor: pointer; width: 100%; margin-bottom: 10px; transition: opacity 0.2s, transform 0.1s;
   }
   button:active { transform: scale(0.98); }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -115,127 +66,44 @@
   .btn-pause { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
   .btn-stop { background: var(--danger); color: #2a0505; }
   .btn-secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
-  .timer {
-    font-size: 28px;
-    font-weight: 700;
-    text-align: center;
-    margin: 16px 0;
-    font-variant-numeric: tabular-nums;
-    color: var(--accent2);
-  }
-  .content {
-    display: flex;
-    flex-direction: column;
-    padding: 20px;
-    gap: 16px;
-    overflow: hidden;
-  }
+  .timer { font-size: 28px; font-weight: 700; text-align: center; margin: 14px 0; font-variant-numeric: tabular-nums; color: var(--accent2); }
+  .content { display: flex; flex-direction: column; padding: 20px; gap: 16px; overflow: hidden; }
   .frame-box {
-    flex: 1;
-    background: #000;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    overflow: hidden;
-    position: relative;
-    min-height: 300px;
+    flex: 1; background: #000; border-radius: 10px; border: 2px solid var(--border);
+    overflow: hidden; position: relative; min-height: 300px;
   }
-  .frame-box iframe {
-    width: 100%;
-    height: 100%;
-    border: none;
-    display: block;
-  }
+  .frame-box.recording-target { border-color: var(--accent2); box-shadow: 0 0 0 2px rgba(0,212,164,0.25); }
+  .frame-box iframe { width: 100%; height: 100%; border: none; display: block; }
   .frame-placeholder {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--muted);
-    font-size: 14px;
-    text-align: center;
-    padding: 20px;
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 14px; text-align: center; padding: 20px;
   }
-  .preview-box {
-    background: #000;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    overflow: hidden;
-    max-height: 220px;
-  }
-  .preview-box video {
-    width: 100%;
-    max-height: 220px;
-    display: block;
-  }
-  .note {
-    font-size: 12.5px;
-    color: var(--muted);
-    line-height: 1.5;
-    background: var(--panel2);
-    padding: 12px;
-    border-radius: 8px;
-    border-left: 3px solid var(--accent);
-  }
+  .preview-box { background: #000; border-radius: 10px; border: 1px solid var(--border); overflow: hidden; max-height: 220px; }
+  .preview-box video { width: 100%; max-height: 220px; display: block; }
+  .note { font-size: 12.5px; color: var(--muted); line-height: 1.5; background: var(--panel2); padding: 12px; border-radius: 8px; border-left: 3px solid var(--accent); }
+  .note.warn { border-left-color: var(--warn); }
   .note strong { color: var(--text); }
-  a.link-open { color: var(--accent2); text-decoration: none; font-size: 13px; }
-  .downloads {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+  .downloads { display: flex; flex-direction: column; gap: 10px; }
+  .download-item { background: var(--panel2); padding: 10px 12px; border-radius: 8px; font-size: 13px; }
+  .download-item .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .download-item a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .download-item .status { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+  .status.ok { color: var(--accent2); }
+  .status.err { color: var(--danger); }
+  .btn-convert, .btn-mini {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 6px 10px;
+    font-size: 12px; font-weight: 600; cursor: pointer; width: auto; margin: 0;
   }
-  .download-item {
-    background: var(--panel2);
-    padding: 10px 12px;
-    border-radius: 8px;
-    font-size: 13px;
-  }
-  .download-item .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  .download-item a {
-    color: var(--accent2);
-    text-decoration: none;
-    font-weight: 600;
-  }
-  .download-item .status {
-    font-size: 11.5px;
-    color: var(--muted);
-    margin-top: 6px;
-  }
-  .btn-convert {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    width: auto;
-    margin: 0;
-  }
-  .btn-convert:disabled { opacity: 0.5; cursor: not-allowed; }
-  select {
-    width: 100%;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--panel2);
-    color: var(--text);
-    font-size: 14px;
-    margin-bottom: 10px;
-  }
+  .btn-convert:disabled, .btn-mini:disabled { opacity: 0.5; cursor: not-allowed; }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 20px; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
 </style>
 </head>
 <body>
 
 <header>
   <div class="dot" id="statusDot"></div>
-  <h1>🎥 Grabador de Pantalla</h1>
+  <h1>🎥 Grabador de Contenedor</h1>
+  <span class="badge" id="supabaseBadge">Supabase: conectando...</span>
 </header>
 
 <main>
@@ -245,15 +113,15 @@
       <h2>Contenedor de página web</h2>
       <input type="url" id="urlInput" placeholder="https://ejemplo.com" />
       <button class="btn-secondary" id="loadUrlBtn">Cargar en el contenedor</button>
-      <div class="note">
-        <strong>Importante:</strong> muchos sitios (Google, YouTube, redes sociales, bancos, etc.) bloquean ser mostrados dentro de un iframe por seguridad, así que puede que no carguen aquí. Aun así, <strong>no necesitas que la página cargue en este contenedor para grabarla</strong>: al iniciar la grabación, elige "Pestaña de Chrome" o "Ventana" y selecciona esa página abierta normalmente en otra pestaña — Chrome grabará esa pestaña con su audio incluido.
+      <div class="note warn">
+        <strong>Sobre grabar "solo el contenedor":</strong> el navegador solo permite recortar la grabación a un elemento específico de la página (API experimental "Element Capture", solo en Chrome) cuando grabas <strong>esta misma pestaña</strong>. Al presionar "Iniciar grabación" elige la opción <strong>"Esta pestaña"</strong> en el diálogo. La app intentará recortar automáticamente al recuadro del contenedor; si tu navegador no soporta esa función, grabará la pestaña completa como respaldo (verás un aviso).
       </div>
     </div>
 
     <div class="section">
       <h2>Opciones de audio</h2>
       <label><input type="checkbox" id="micCheck"> Incluir micrófono</label>
-      <div class="note">Para audio del sistema/pestaña: al presionar "Compartir", en el diálogo de Chrome marca la casilla <strong>"Compartir audio de la pestaña"</strong> (o "audio del sistema" si compartes toda la pantalla).</div>
+      <div class="note">Al compartir, marca <strong>"Compartir audio de la pestaña"</strong> en el diálogo de Chrome para incluir el sonido que reproduzca la página cargada en el contenedor.</div>
     </div>
 
     <div class="section">
@@ -266,9 +134,7 @@
 
     <div class="section" id="previewSection" style="display:none;">
       <h2>Vista previa en vivo</h2>
-      <div class="preview-box">
-        <video id="livePreview" autoplay muted></video>
-      </div>
+      <div class="preview-box"><video id="livePreview" autoplay muted></video></div>
     </div>
 
     <div class="section" id="downloadsSection" style="display:none;">
@@ -281,25 +147,34 @@
   <div class="content">
     <div class="frame-box" id="frameBox">
       <div class="frame-placeholder" id="framePlaceholder">
-        Escribe una URL a la izquierda y presiona "Cargar en el contenedor" para abrir una página web aquí.<br><br>
-        Recuerda: para grabarla con audio, ábrela también en una pestaña normal de Chrome y selecciónala al compartir pantalla.
+        Escribe una URL a la izquierda y presiona "Cargar en el contenedor".<br><br>
+        Este recuadro es lo que la app intentará grabar (recorte automático si tu navegador lo soporta).
       </div>
     </div>
   </div>
 </main>
 
 <script>
-let mediaRecorder;
-let recordedChunks = [];
-let displayStream;
-let micStream;
-let combinedStream;
-let startTime;
-let timerInterval;
-let elapsedBeforePause = 0;
-let isPaused = false;
+/* ---------- Configuración de Supabase ---------- */
+const SUPABASE_URL = 'https://gaeluelhcedzbnrrbxbs.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdhZWx1ZWxoY2VkemJucnJieGJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2OTU1OTIsImV4cCI6MjEwNDI3MTU5Mn0.h_-HBUW6V0rnXprAS_U0FxoOdXu6Nq2RzMnOrzLhhYY';
+const SUPABASE_BUCKET = 'grabaciones';
+const SUPABASE_TABLE = 'grabaciones';
+
+let supabaseClient = null;
+try {
+  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  document.getElementById('supabaseBadge').textContent = 'Supabase: listo';
+} catch (e) {
+  document.getElementById('supabaseBadge').textContent = 'Supabase: error de conexión';
+  console.error(e);
+}
+
+/* ---------- Estado ---------- */
+let mediaRecorder, recordedChunks = [], displayStream, micStream, combinedStream;
+let startTime, timerInterval, elapsedBeforePause = 0, isPaused = false;
 let ffmpegInstance = null;
-let recordingCounter = 0;
+let usedElementCapture = false;
 
 const startBtn = document.getElementById('startBtn');
 const pauseBtn = document.getElementById('pauseBtn');
@@ -318,15 +193,11 @@ const frameBox = document.getElementById('frameBox');
 loadUrlBtn.addEventListener('click', () => {
   let url = urlInput.value.trim();
   if (!url) return;
-  if (!/^https?:\/\//i.test(url)) {
-    url = 'https://' + url;
-  }
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   frameBox.innerHTML = '';
   const iframe = document.createElement('iframe');
   iframe.src = url;
-  iframe.onerror = () => {
-    frameBox.innerHTML = '<div class="frame-placeholder">No se pudo cargar esta página dentro del contenedor (puede bloquear el uso de iframes). Ábrela en una pestaña normal de Chrome para grabarla igualmente.</div>';
-  };
+  iframe.id = 'targetFrame';
   frameBox.appendChild(iframe);
 });
 
@@ -337,25 +208,47 @@ function formatTime(ms) {
   const s = String(totalSec % 60).padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
-
 function updateTimer() {
   const elapsed = elapsedBeforePause + (isPaused ? 0 : (Date.now() - startTime));
   timerEl.textContent = formatTime(elapsed);
 }
+function getElapsedSeconds() {
+  return Math.floor((elapsedBeforePause + (isPaused ? 0 : (Date.now() - startTime))) / 1000);
+}
 
 async function startRecording() {
   try {
-    displayStream = await navigator.mediaDevices.getDisplayMedia({
+    const constraints = {
       video: { frameRate: 30 },
-      audio: true
-    });
+      audio: true,
+      preferCurrentTab: true,
+      selfBrowserSurface: 'include'
+    };
+    displayStream = await navigator.mediaDevices.getDisplayMedia(constraints);
   } catch (err) {
-    alert('No se pudo iniciar la captura de pantalla: ' + err.message);
+    alert('No se pudo iniciar la captura: ' + err.message);
     return;
   }
 
-  let tracks = [...displayStream.getTracks()];
+  const videoTrack = displayStream.getVideoTracks()[0];
+  usedElementCapture = false;
 
+  try {
+    if (typeof RestrictionTarget !== 'undefined' && RestrictionTarget.fromElement) {
+      const target = await RestrictionTarget.fromElement(frameBox);
+      await videoTrack.restrictTo(target);
+      usedElementCapture = true;
+      frameBox.classList.add('recording-target');
+    }
+  } catch (e) {
+    console.warn('Element Capture no disponible, se grabará la pestaña completa:', e);
+  }
+
+  if (!usedElementCapture) {
+    alert('Tu navegador no soporta recortar la grabación solo al contenedor (función experimental de Chrome). Se grabará la pestaña completa. Para mejor resultado, maximiza la ventana y deja visible solo el contenedor, o activa chrome://flags/#enable-experimental-web-platform-features.');
+  }
+
+  let tracks = [...displayStream.getTracks()];
   if (micCheck.checked) {
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -366,30 +259,24 @@ async function startRecording() {
   }
 
   combinedStream = new MediaStream(tracks);
-
   livePreview.srcObject = displayStream;
   previewSection.style.display = 'block';
 
   recordedChunks = [];
   let mimeType = 'video/webm;codecs=vp9,opus';
-  if (!MediaRecorder.isTypeSupported(mimeType)) {
-    mimeType = 'video/webm';
-  }
+  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
 
   mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
-
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
-  };
-
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = () => {
     const blob = new Blob(recordedChunks, { type: 'video/webm' });
     const timestamp = new Date().toLocaleString('es-ES').replace(/[\/:]/g, '-');
-    addDownloadItem(blob, `grabacion-${timestamp}`);
+    const durationSec = getElapsedSeconds();
+    addDownloadItem(blob, `grabacion-${timestamp}`, durationSec);
     cleanupStreams();
   };
 
-  displayStream.getVideoTracks()[0].addEventListener('ended', () => {
+  videoTrack.addEventListener('ended', () => {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') stopRecording();
   });
 
@@ -422,9 +309,7 @@ function pauseRecording() {
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
   clearInterval(timerInterval);
   statusDot.classList.remove('recording');
   startBtn.disabled = false;
@@ -433,6 +318,7 @@ function stopRecording() {
   stopBtn.disabled = true;
   micCheck.disabled = false;
   timerEl.textContent = '00:00:00';
+  frameBox.classList.remove('recording-target');
 }
 
 function cleanupStreams() {
@@ -442,35 +328,31 @@ function cleanupStreams() {
   previewSection.style.display = 'none';
 }
 
+/* ---------- Conversión a MP4 (ffmpeg.wasm) ---------- */
 async function getFFmpeg(statusEl) {
   if (!ffmpegInstance) {
     const { createFFmpeg } = FFmpeg;
-    ffmpegInstance = createFFmpeg({
-      log: false,
-      corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
-    });
+    ffmpegInstance = createFFmpeg({ log: false, corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js' });
   }
   if (!ffmpegInstance.isLoaded()) {
-    statusEl.textContent = 'Descargando conversor (una sola vez, puede tardar según tu conexión)...';
+    statusEl.textContent = 'Descargando conversor (una sola vez)...';
     await ffmpegInstance.load();
   }
   return ffmpegInstance;
 }
 
-async function convertToMp4(webmBlob, filenameBase, statusEl, convertBtn, itemEl) {
+async function convertToMp4(webmBlob, filenameBase, statusEl, convertBtn) {
   convertBtn.disabled = true;
   try {
     const { fetchFile } = FFmpeg;
     const ff = await getFFmpeg(statusEl);
-    statusEl.textContent = 'Convirtiendo a MP4, no cierres esta pestaña...';
-    const inputName = 'input.webm';
-    const outputName = 'output.mp4';
-    ff.FS('writeFile', inputName, await fetchFile(webmBlob));
-    await ff.run('-i', inputName, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', outputName);
-    const data = ff.FS('readFile', outputName);
+    statusEl.textContent = 'Convirtiendo a MP4...';
+    ff.FS('writeFile', 'input.webm', await fetchFile(webmBlob));
+    await ff.run('-i', 'input.webm', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', 'output.mp4');
+    const data = ff.FS('readFile', 'output.mp4');
     const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
     const url = URL.createObjectURL(mp4Blob);
-    try { ff.FS('unlink', inputName); ff.FS('unlink', outputName); } catch(e) {}
+    try { ff.FS('unlink', 'input.webm'); ff.FS('unlink', 'output.mp4'); } catch(e) {}
     statusEl.textContent = '';
     const mp4Link = document.createElement('a');
     mp4Link.href = url;
@@ -479,12 +361,51 @@ async function convertToMp4(webmBlob, filenameBase, statusEl, convertBtn, itemEl
     convertBtn.replaceWith(mp4Link);
   } catch (err) {
     console.error(err);
-    statusEl.textContent = 'Error al convertir. Puedes descargar el WEBM y convertirlo con otro programa.';
+    statusEl.textContent = 'Error al convertir a MP4.';
     convertBtn.disabled = false;
   }
 }
 
-function addDownloadItem(webmBlob, filenameBase) {
+/* ---------- Subida a Supabase ---------- */
+async function uploadToSupabase(blob, filenameBase, durationSec, statusEl) {
+  if (!supabaseClient) {
+    statusEl.textContent = 'Supabase no está configurado.';
+    statusEl.className = 'status err';
+    return;
+  }
+  statusEl.textContent = 'Subiendo a Supabase...';
+  statusEl.className = 'status';
+  const path = `${filenameBase}.webm`;
+  try {
+    const { error: uploadError } = await supabaseClient.storage
+      .from(SUPABASE_BUCKET)
+      .upload(path, blob, { contentType: 'video/webm', upsert: true });
+    if (uploadError) throw uploadError;
+
+    const { data: publicUrlData } = supabaseClient.storage.from(SUPABASE_BUCKET).getPublicUrl(path);
+    const publicUrl = publicUrlData?.publicUrl || null;
+
+    const { error: insertError } = await supabaseClient
+      .from(SUPABASE_TABLE)
+      .insert({
+        nombre_archivo: path,
+        url: publicUrl,
+        formato: 'webm',
+        duracion_segundos: durationSec
+      });
+    if (insertError) throw insertError;
+
+    statusEl.textContent = '✔ Guardado en Supabase';
+    statusEl.className = 'status ok';
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'Error al guardar en Supabase: ' + (err.message || 'revisa que el bucket "' + SUPABASE_BUCKET + '" y la tabla "' + SUPABASE_TABLE + '" existan.');
+    statusEl.className = 'status err';
+  }
+}
+
+/* ---------- UI de la lista de grabaciones ---------- */
+function addDownloadItem(webmBlob, filenameBase, durationSec) {
   downloadsSection.style.display = 'block';
   const webmUrl = URL.createObjectURL(webmBlob);
 
@@ -495,11 +416,12 @@ function addDownloadItem(webmBlob, filenameBase) {
   row.className = 'row';
 
   const name = document.createElement('span');
-  name.textContent = filenameBase;
+  name.textContent = filenameBase + (usedElementCapture ? ' (recorte de contenedor)' : ' (pestaña completa)');
 
   const actions = document.createElement('div');
   actions.style.display = 'flex';
   actions.style.gap = '8px';
+  actions.style.flexWrap = 'wrap';
 
   const webmLink = document.createElement('a');
   webmLink.href = webmUrl;
@@ -510,11 +432,14 @@ function addDownloadItem(webmBlob, filenameBase) {
   convertBtn.className = 'btn-convert';
   convertBtn.textContent = 'Convertir a MP4';
 
-  const status = document.createElement('div');
-  status.className = 'status';
+  const uploadStatus = document.createElement('div');
+  uploadStatus.className = 'status';
+
+  const convertStatus = document.createElement('div');
+  convertStatus.className = 'status';
 
   convertBtn.addEventListener('click', () => {
-    convertToMp4(webmBlob, filenameBase, status, convertBtn, item);
+    convertToMp4(webmBlob, filenameBase, convertStatus, convertBtn);
   });
 
   actions.appendChild(webmLink);
@@ -522,8 +447,11 @@ function addDownloadItem(webmBlob, filenameBase) {
   row.appendChild(name);
   row.appendChild(actions);
   item.appendChild(row);
-  item.appendChild(status);
+  item.appendChild(uploadStatus);
+  item.appendChild(convertStatus);
   downloadsList.prepend(item);
+
+  uploadToSupabase(webmBlob, filenameBase, durationSec, uploadStatus);
 }
 
 startBtn.addEventListener('click', startRecording);
