@@ -263,16 +263,32 @@ async function startRecording() {
   previewSection.style.display = 'block';
 
   recordedChunks = [];
-  let mimeType = 'video/webm;codecs=vp9,opus';
-  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+  const mp4Candidates = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=h264,aac',
+    'video/mp4'
+  ];
+  let mimeType = mp4Candidates.find(t => MediaRecorder.isTypeSupported(t));
+  let recordingExt = 'mp4';
+  if (!mimeType) {
+    mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+      ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+    recordingExt = 'webm';
+  }
 
   mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
   mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
   mediaRecorder.onstop = () => {
-    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const totalSize = recordedChunks.reduce((sum, c) => sum + c.size, 0);
     const timestamp = new Date().toLocaleString('es-ES').replace(/[\/:]/g, '-');
     const durationSec = getElapsedSeconds();
-    addDownloadItem(blob, `grabacion-${timestamp}`, durationSec);
+    if (totalSize === 0) {
+      alert('La grabación quedó vacía (0 bytes). Esto suele pasar si se canceló el permiso de captura o la pestaña compartida se cerró muy rápido. Intenta grabar de nuevo sin cerrar ni cambiar de pestaña compartida durante la grabación.');
+      cleanupStreams();
+      return;
+    }
+    const blob = new Blob(recordedChunks, { type: recordingExt === 'mp4' ? 'video/mp4' : 'video/webm' });
+    addDownloadItem(blob, `grabacion-${timestamp}`, durationSec, recordingExt);
     cleanupStreams();
   };
 
@@ -367,7 +383,7 @@ async function convertToMp4(webmBlob, filenameBase, statusEl, convertBtn) {
 }
 
 /* ---------- Subida a Supabase ---------- */
-async function uploadToSupabase(blob, filenameBase, durationSec, statusEl) {
+async function uploadToSupabase(blob, filenameBase, durationSec, ext, statusEl) {
   if (!supabaseClient) {
     statusEl.textContent = 'Supabase no está configurado.';
     statusEl.className = 'status err';
@@ -375,11 +391,12 @@ async function uploadToSupabase(blob, filenameBase, durationSec, statusEl) {
   }
   statusEl.textContent = 'Subiendo a Supabase...';
   statusEl.className = 'status';
-  const path = `${filenameBase}.webm`;
+  const path = `${filenameBase}.${ext}`;
+  const contentType = ext === 'mp4' ? 'video/mp4' : 'video/webm';
   try {
     const { error: uploadError } = await supabaseClient.storage
       .from(SUPABASE_BUCKET)
-      .upload(path, blob, { contentType: 'video/webm', upsert: true });
+      .upload(path, blob, { contentType, upsert: true });
     if (uploadError) throw uploadError;
 
     const { data: publicUrlData } = supabaseClient.storage.from(SUPABASE_BUCKET).getPublicUrl(path);
@@ -390,7 +407,7 @@ async function uploadToSupabase(blob, filenameBase, durationSec, statusEl) {
       .insert({
         nombre_archivo: path,
         url: publicUrl,
-        formato: 'webm',
+        formato: ext,
         duracion_segundos: durationSec
       });
     if (insertError) throw insertError;
@@ -405,9 +422,9 @@ async function uploadToSupabase(blob, filenameBase, durationSec, statusEl) {
 }
 
 /* ---------- UI de la lista de grabaciones ---------- */
-function addDownloadItem(webmBlob, filenameBase, durationSec) {
+function addDownloadItem(blob, filenameBase, durationSec, ext) {
   downloadsSection.style.display = 'block';
-  const webmUrl = URL.createObjectURL(webmBlob);
+  const blobUrl = URL.createObjectURL(blob);
 
   const item = document.createElement('div');
   item.className = 'download-item';
@@ -416,34 +433,36 @@ function addDownloadItem(webmBlob, filenameBase, durationSec) {
   row.className = 'row';
 
   const name = document.createElement('span');
-  name.textContent = filenameBase + (usedElementCapture ? ' (recorte de contenedor)' : ' (pestaña completa)');
+  name.textContent = filenameBase + (usedElementCapture ? ' (recorte de contenedor)' : ' (pestaña completa)') +
+    (ext === 'mp4' ? ' — MP4 nativo' : ' — WEBM (tu navegador no graba MP4 directo)');
 
   const actions = document.createElement('div');
   actions.style.display = 'flex';
   actions.style.gap = '8px';
   actions.style.flexWrap = 'wrap';
 
-  const webmLink = document.createElement('a');
-  webmLink.href = webmUrl;
-  webmLink.download = filenameBase + '.webm';
-  webmLink.textContent = 'Descargar WEBM';
-
-  const convertBtn = document.createElement('button');
-  convertBtn.className = 'btn-convert';
-  convertBtn.textContent = 'Convertir a MP4';
+  const mainLink = document.createElement('a');
+  mainLink.href = blobUrl;
+  mainLink.download = filenameBase + '.' + ext;
+  mainLink.textContent = 'Descargar ' + ext.toUpperCase();
 
   const uploadStatus = document.createElement('div');
   uploadStatus.className = 'status';
-
   const convertStatus = document.createElement('div');
   convertStatus.className = 'status';
 
-  convertBtn.addEventListener('click', () => {
-    convertToMp4(webmBlob, filenameBase, convertStatus, convertBtn);
-  });
+  actions.appendChild(mainLink);
 
-  actions.appendChild(webmLink);
-  actions.appendChild(convertBtn);
+  if (ext === 'webm') {
+    const convertBtn = document.createElement('button');
+    convertBtn.className = 'btn-convert';
+    convertBtn.textContent = 'Convertir a MP4';
+    convertBtn.addEventListener('click', () => {
+      convertToMp4(blob, filenameBase, convertStatus, convertBtn);
+    });
+    actions.appendChild(convertBtn);
+  }
+
   row.appendChild(name);
   row.appendChild(actions);
   item.appendChild(row);
@@ -451,7 +470,7 @@ function addDownloadItem(webmBlob, filenameBase, durationSec) {
   item.appendChild(convertStatus);
   downloadsList.prepend(item);
 
-  uploadToSupabase(webmBlob, filenameBase, durationSec, uploadStatus);
+  uploadToSupabase(blob, filenameBase, durationSec, ext, uploadStatus);
 }
 
 startBtn.addEventListener('click', startRecording);
