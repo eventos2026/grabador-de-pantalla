@@ -114,7 +114,7 @@
       <input type="url" id="urlInput" placeholder="https://ejemplo.com" />
       <button class="btn-secondary" id="loadUrlBtn">Cargar en el contenedor</button>
       <div class="note warn">
-        <strong>Sobre grabar "solo el contenedor":</strong> el navegador solo permite recortar la grabación a un elemento específico de la página (API experimental "Element Capture", solo en Chrome) cuando grabas <strong>esta misma pestaña</strong>. Al presionar "Iniciar grabación" elige la opción <strong>"Esta pestaña"</strong> en el diálogo. La app intentará recortar automáticamente al recuadro del contenedor; si tu navegador no soporta esa función, grabará la pestaña completa como respaldo (verás un aviso).
+        <strong>Sobre grabar "solo el contenedor":</strong> los navegadores no permiten recortar de forma confiable la grabación a un solo elemento de la página (esa función es experimental y falló en las pruebas, produciendo grabaciones vacías). Por eso esta app graba la <strong>pestaña o ventana completa</strong> que elijas en el diálogo de Chrome. Para que el resultado se parezca a "solo el contenedor": elige <strong>"Esta pestaña"</strong> y usa la app en pantalla completa (F11) o deja visible solo el panel derecho antes de grabar.
       </div>
     </div>
 
@@ -148,7 +148,7 @@
     <div class="frame-box" id="frameBox">
       <div class="frame-placeholder" id="framePlaceholder">
         Escribe una URL a la izquierda y presiona "Cargar en el contenedor".<br><br>
-        Este recuadro es lo que la app intentará grabar (recorte automático si tu navegador lo soporta).
+        Al grabar, elige "Esta pestaña" en el diálogo de Chrome para capturar lo que ves aquí.
       </div>
     </div>
   </div>
@@ -218,13 +218,10 @@ function getElapsedSeconds() {
 
 async function startRecording() {
   try {
-    const constraints = {
+    displayStream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: 30 },
-      audio: true,
-      preferCurrentTab: true,
-      selfBrowserSurface: 'include'
-    };
-    displayStream = await navigator.mediaDevices.getDisplayMedia(constraints);
+      audio: true
+    });
   } catch (err) {
     alert('No se pudo iniciar la captura: ' + err.message);
     return;
@@ -232,21 +229,6 @@ async function startRecording() {
 
   const videoTrack = displayStream.getVideoTracks()[0];
   usedElementCapture = false;
-
-  try {
-    if (typeof RestrictionTarget !== 'undefined' && RestrictionTarget.fromElement) {
-      const target = await RestrictionTarget.fromElement(frameBox);
-      await videoTrack.restrictTo(target);
-      usedElementCapture = true;
-      frameBox.classList.add('recording-target');
-    }
-  } catch (e) {
-    console.warn('Element Capture no disponible, se grabará la pestaña completa:', e);
-  }
-
-  if (!usedElementCapture) {
-    alert('Tu navegador no soporta recortar la grabación solo al contenedor (función experimental de Chrome). Se grabará la pestaña completa. Para mejor resultado, maximiza la ventana y deja visible solo el contenedor, o activa chrome://flags/#enable-experimental-web-platform-features.');
-  }
 
   let tracks = [...displayStream.getTracks()];
   if (micCheck.checked) {
