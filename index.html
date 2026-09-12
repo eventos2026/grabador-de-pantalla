@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
 <style>
   :root{
     --bg: #12161d;
@@ -187,6 +188,40 @@
   .scan-input:focus{border-color:var(--amber);}
   .scan-icon{position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--amber); opacity:.8;}
   .scan-hint{font-size:11.5px; color:var(--muted); margin-top:8px;}
+  .btn-camera{
+    all:unset; position:absolute; right:8px; top:50%; transform:translateY(-50%);
+    width:38px; height:38px; border-radius:7px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    color:#1a1204; background:var(--amber);
+  }
+  .btn-camera:hover{background:#f5b654;}
+
+  /* Modal de escaneo con cámara */
+  .camera-modal{
+    display:none; position:fixed; inset:0; z-index:100;
+    background:rgba(6,8,11,.88); backdrop-filter:blur(2px);
+    align-items:center; justify-content:center; padding:18px;
+  }
+  .camera-modal.show{display:flex;}
+  .camera-modal-panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:16px; width:100%; max-width:480px;
+  }
+  .camera-modal-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+  .camera-modal-head h3{font-size:14px; margin:0; font-weight:600;}
+  .camera-close{all:unset; cursor:pointer; color:var(--muted); font-size:20px; line-height:1; padding:4px;}
+  .camera-close:hover{color:var(--text);}
+  .camera-video-wrap{
+    position:relative; width:100%; aspect-ratio:4/3; background:#000;
+    border-radius:8px; overflow:hidden; border:1px solid var(--line);
+  }
+  .camera-video-wrap video{width:100%; height:100%; object-fit:cover; display:block;}
+  .camera-video-wrap::after{
+    content:""; position:absolute; left:10%; right:10%; top:42%; height:16%;
+    border:2px solid var(--amber); border-radius:6px; opacity:.85; pointer-events:none;
+  }
+  .camera-status{font-size:12px; color:var(--muted); margin-top:10px; text-align:center; min-height:16px;}
+  .camera-modal-foot{display:flex; gap:10px; margin-top:12px; align-items:center;}
 
   .found-card{
     display:flex; align-items:center; gap:16px;
@@ -389,8 +424,11 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="2" height="14"/><rect x="7" y="5" width="1" height="14"/><rect x="10" y="5" width="3" height="14"/><rect x="15" y="5" width="1" height="14"/><rect x="18" y="5" width="2" height="14"/></svg>
           </span>
           <input type="text" class="scan-input" id="input-scan" placeholder="Escanear código de barras…" autocomplete="off">
+          <button class="btn-camera" id="btn-abrir-camara" title="Escanear con la cámara">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8a2 2 0 012-2h1.5l1-1.5h7l1 1.5H18a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V8z"/><circle cx="12" cy="13" r="3.2"/></svg>
+          </button>
         </div>
-        <p class="scan-hint">El lector de código de barras funciona como un teclado: escanea y presiona Enter automáticamente.</p>
+        <p class="scan-hint">Con lector físico: escanea y presiona Enter automáticamente. En el celular, toca el ícono de cámara para escanear con la cámara del dispositivo.</p>
 
         <div class="found-card" id="scan-result" style="display:none;">
           <div class="info">
@@ -472,6 +510,25 @@
     </div>
 
   </main>
+</div>
+
+<div class="camera-modal" id="camera-modal">
+  <div class="camera-modal-panel">
+    <div class="camera-modal-head">
+      <h3>Escanear con la cámara</h3>
+      <button class="camera-close" id="btn-cerrar-camara">&times;</button>
+    </div>
+    <div class="camera-video-wrap">
+      <video id="camera-video" autoplay muted playsinline></video>
+    </div>
+    <div class="camera-status" id="camera-status">Iniciando cámara…</div>
+    <div class="camera-modal-foot">
+      <div class="field grow" style="min-width:auto;">
+        <select id="camera-device-select"></select>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="btn-cerrar-camara-2">Cerrar</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -985,6 +1042,85 @@ document.getElementById("btn-exportar-comparativo").addEventListener("click", ()
   XLSX.utils.book_append_sheet(wb, ws, "Comparativo");
   XLSX.writeFile(wb, "comparativo_inventario.xlsx");
 });
+
+/* ================== ESCANEO CON CÁMARA ================== */
+let zxingReader = null;
+let camaraActiva = false;
+
+function abrirModalCamara(){
+  document.getElementById("camera-modal").classList.add("show");
+  document.getElementById("camera-status").textContent = "Iniciando cámara…";
+  iniciarEscaneoCamara();
+}
+
+function cerrarModalCamara(){
+  document.getElementById("camera-modal").classList.remove("show");
+  detenerCamara();
+}
+
+function detenerCamara(){
+  camaraActiva = false;
+  if(zxingReader){
+    try{ zxingReader.reset(); }catch(e){}
+  }
+}
+
+async function iniciarEscaneoCamara(){
+  if(typeof ZXing === "undefined"){
+    document.getElementById("camera-status").textContent = "No se pudo cargar el módulo de cámara.";
+    toast("No se pudo cargar el módulo de escaneo por cámara", "err");
+    return;
+  }
+  if(!zxingReader){
+    zxingReader = new ZXing.BrowserMultiFormatReader();
+  }
+  const statusEl = document.getElementById("camera-status");
+  const select = document.getElementById("camera-device-select");
+
+  try{
+    const dispositivos = await ZXing.BrowserCodeReader.listVideoInputDevices();
+    if(!dispositivos || dispositivos.length === 0){
+      statusEl.textContent = "No se encontró ninguna cámara en este dispositivo.";
+      toast("No se encontró cámara", "err");
+      return;
+    }
+    select.innerHTML = dispositivos.map((d,i)=>`<option value="${d.deviceId}">${d.label || ("Cámara " + (i+1))}</option>`).join("");
+
+    // Preferir cámara trasera si el label lo indica
+    const trasera = dispositivos.find(d => /back|trasera|rear|environment/i.test(d.label));
+    const deviceIdInicial = trasera ? trasera.deviceId : dispositivos[dispositivos.length - 1].deviceId;
+    select.value = deviceIdInicial;
+
+    lanzarDecodificacion(deviceIdInicial);
+
+    select.onchange = ()=> lanzarDecodificacion(select.value);
+  }catch(err){
+    statusEl.textContent = "No se pudo acceder a la cámara: permiso denegado o no disponible.";
+    toast("No se pudo acceder a la cámara", "err");
+  }
+}
+
+function lanzarDecodificacion(deviceId){
+  const statusEl = document.getElementById("camera-status");
+  camaraActiva = true;
+  statusEl.textContent = "Apunta la cámara al código de barras…";
+  zxingReader.reset();
+  zxingReader.decodeFromVideoDevice(deviceId, "camera-video", (result, err)=>{
+    if(!camaraActiva) return;
+    if(result){
+      const codigo = result.getText();
+      statusEl.textContent = "Código detectado: " + codigo;
+      document.getElementById("input-scan").value = codigo;
+      cerrarModalCamara();
+      buscarPorCodigoBarras(codigo);
+    }
+    // NotFoundException se dispara continuamente mientras no hay lectura; se ignora.
+  });
+}
+
+document.getElementById("btn-abrir-camara").addEventListener("click", abrirModalCamara);
+document.getElementById("btn-cerrar-camara").addEventListener("click", cerrarModalCamara);
+document.getElementById("btn-cerrar-camara-2").addEventListener("click", cerrarModalCamara);
 
 /* ================== INICIO ================== */
 (async function init(){
