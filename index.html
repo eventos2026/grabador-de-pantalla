@@ -408,7 +408,7 @@
     <!-- ============ VISTA INVENTARIO EN VIVO ============ -->
     <div class="view" id="view-conteo">
       <h1>Inventario en vivo</h1>
-      <p class="subhead">Escanea el código de barras de cada producto para contarlo. Los combos no tienen código de barras: agrégalos manualmente buscando por referencia o nombre.</p>
+      <p class="subhead">Escanea el código de barras de cada producto para contarlo. Los combos no se cuentan como una referencia aparte: digita cuántos combos contaste y la app reparte automáticamente esas unidades sobre el conteo de cada referencia que lo compone.</p>
 
       <div class="row" style="margin-bottom:16px;">
         <div class="field">
@@ -442,7 +442,7 @@
       </div>
 
       <div class="panel">
-        <h2>Agregar combo manualmente <span class="tag">sin código de barras</span></h2>
+        <h2>Aplicar combo contado <span class="tag">reparte las unidades entre sus referencias — no se cuenta el combo aparte</span></h2>
         <div class="row">
           <div class="field grow">
             <label>Buscar combo (referencia o nombre)</label>
@@ -450,17 +450,24 @@
             <datalist id="lista-combos"></datalist>
           </div>
           <div class="field">
-            <label>Cantidad</label>
+            <label>Combos contados</label>
             <input type="number" id="combo-cantidad" value="1" min="0" step="any">
           </div>
-          <button class="btn btn-primary" id="btn-agregar-combo">Agregar combo</button>
+          <button class="btn btn-primary" id="btn-agregar-combo">Aplicar combo</button>
         </div>
+        <p class="scan-hint">Ejemplo: si el Combo 15 trae 6 unidades de "TETRA VERDE 24° X 1050" por combo, y contaste 2 combos, se sumarán 12 unidades al conteo de esa referencia (6 × 2).</p>
+
+        <table style="margin-top:16px;">
+          <thead><tr><th>Combo</th><th class="num">Combos aplicados</th><th>Cuándo</th><th></th></tr></thead>
+          <tbody id="tbl-combos-aplicados"></tbody>
+        </table>
+        <div class="empty-state" id="combos-aplicados-empty">Aún no has aplicado ningún combo en este lote.</div>
       </div>
 
       <div class="kpi-row">
         <div class="kpi"><div class="kpi-label">Ítems distintos</div><div class="kpi-value" id="kpi-items">0</div></div>
         <div class="kpi"><div class="kpi-label">Unidades contadas</div><div class="kpi-value" id="kpi-unidades">0</div></div>
-        <div class="kpi"><div class="kpi-label">Combos contados</div><div class="kpi-value" id="kpi-combos">0</div></div>
+        <div class="kpi"><div class="kpi-label">Combos aplicados</div><div class="kpi-value" id="kpi-combos">0</div></div>
       </div>
 
       <div class="panel">
@@ -542,6 +549,7 @@ let productos = [];               // catálogo completo {referencia, nombre, cod
 let comboLineCount = 0;
 let loteConteoActivo = "";
 let conteoLocal = {};             // referencia -> {referencia, nombre, codigo_barras, es_combo, cantidad}
+let combosAplicadosLocal = [];    // [{id, combo_referencia, combo_nombre, cantidad_combos, aplicado_at}]
 
 /* ================== UTILIDADES UI ================== */
 function toast(msg, tipo="ok"){
@@ -825,6 +833,7 @@ document.getElementById("btn-cargar-lote-conteo").addEventListener("click", asyn
     };
   });
   renderConteo();
+  await cargarCombosAplicados(lote);
   toast("Lote \"" + lote + "\" listo (" + (data ? data.length : 0) + " ítems previos)");
   document.getElementById("input-scan").focus();
 });
@@ -875,19 +884,118 @@ document.getElementById("btn-confirmar-scan").addEventListener("click", ()=>{
   document.getElementById("input-scan").focus();
 });
 
-document.getElementById("btn-agregar-combo").addEventListener("click", ()=>{
+document.getElementById("btn-agregar-combo").addEventListener("click", async ()=>{
   if(!loteConteoActivo){ toast("Primero define un lote de conteo arriba", "err"); return; }
   const texto = document.getElementById("input-buscar-combo").value.trim();
   const refTexto = texto.split(" — ")[0].trim();
   const combo = productos.find(p => p.es_combo && p.referencia === refTexto);
   if(!combo){ toast("Combo no encontrado. Selecciónalo de la lista.", "err"); return; }
-  const cantidad = parseFloat(document.getElementById("combo-cantidad").value) || 0;
-  agregarAlConteo({referencia: combo.referencia, nombre: combo.nombre, codigo_barras: null, es_combo: true}, cantidad);
-  document.getElementById("input-buscar-combo").value = "";
-  document.getElementById("combo-cantidad").value = 1;
+  const cantidadCombos = parseFloat(document.getElementById("combo-cantidad").value) || 0;
+  if(cantidadCombos <= 0){ toast("Escribe cuántos combos contaste", "err"); return; }
+
+  const btn = document.getElementById("btn-agregar-combo");
+  btn.disabled = true;
+  try{
+    await aplicarCombo(combo, cantidadCombos);
+    document.getElementById("input-buscar-combo").value = "";
+    document.getElementById("combo-cantidad").value = 1;
+  } finally {
+    btn.disabled = false;
+  }
 });
 
-async function agregarAlConteo(item, cantidad){
+async function obtenerComponentesCombo(comboReferencia){
+  const {data, error} = await sb.from("combo_componentes").select("item_referencia, cantidad").eq("combo_referencia", comboReferencia);
+  if(error){ toast("Error consultando los componentes del combo: " + error.message, "err"); return []; }
+  return data || [];
+}
+
+async function aplicarCombo(combo, cantidadCombos){
+  const componentes = await obtenerComponentesCombo(combo.referencia);
+  if(componentes.length === 0){
+    toast("Este combo no tiene componentes definidos en combo_componentes", "err");
+    return;
+  }
+
+  const detalles = [];
+  for(const comp of componentes){
+    const producto = productos.find(p => p.referencia === comp.item_referencia);
+    const nombreComp = producto ? producto.nombre : comp.item_referencia;
+    const codigoComp = producto ? producto.codigo_barras : null;
+    const cantidadSumar = Number(comp.cantidad) * cantidadCombos;
+    await agregarAlConteo({referencia: comp.item_referencia, nombre: nombreComp, codigo_barras: codigoComp, es_combo: false}, cantidadSumar, {silencioso:true});
+    detalles.push(comp.item_referencia + " +" + cantidadSumar);
+  }
+
+  const {data, error} = await sb.from("combo_aplicaciones").insert({
+    lote: loteConteoActivo,
+    combo_referencia: combo.referencia,
+    combo_nombre: combo.nombre,
+    cantidad_combos: cantidadCombos
+  }).select().single();
+
+  if(error){
+    toast("Se sumó a las referencias, pero no se pudo registrar el combo en el historial: " + error.message, "err");
+  }else{
+    combosAplicadosLocal.unshift(data);
+    renderCombosAplicados();
+  }
+
+  toast(combo.referencia + " × " + cantidadCombos + " → " + detalles.join(", "));
+}
+
+async function revertirCombo(aplicacion){
+  if(!confirm("¿Revertir " + aplicacion.combo_nombre + " × " + aplicacion.cantidad_combos + "? Se restarán las unidades que sumó a cada referencia.")) return;
+
+  const componentes = await obtenerComponentesCombo(aplicacion.combo_referencia);
+  for(const comp of componentes){
+    const item = conteoLocal[comp.item_referencia];
+    const restar = Number(comp.cantidad) * Number(aplicacion.cantidad_combos);
+    const nuevaCantidad = Math.max(0, (item ? item.cantidad : 0) - restar);
+    if(item){
+      item.cantidad = nuevaCantidad;
+      await sb.from("conteo_fisico").update({cantidad_contada: nuevaCantidad, updated_at: new Date().toISOString()})
+        .eq("lote", loteConteoActivo).eq("referencia", comp.item_referencia);
+    }
+  }
+  renderConteo();
+
+  const {error} = await sb.from("combo_aplicaciones").delete().eq("id", aplicacion.id);
+  if(error){ toast("Error eliminando el registro del combo: " + error.message, "err"); }
+
+  combosAplicadosLocal = combosAplicadosLocal.filter(a => a.id !== aplicacion.id);
+  renderCombosAplicados();
+  toast("Combo revertido");
+}
+
+async function cargarCombosAplicados(lote){
+  const {data, error} = await sb.from("combo_aplicaciones").select("*").eq("lote", lote).order("aplicado_at", {ascending:false});
+  if(error){ toast("Error cargando historial de combos: " + error.message, "err"); combosAplicadosLocal = []; }
+  else{ combosAplicadosLocal = data || []; }
+  renderCombosAplicados();
+}
+
+function renderCombosAplicados(){
+  const tbody = document.getElementById("tbl-combos-aplicados");
+  const empty = document.getElementById("combos-aplicados-empty");
+  if(combosAplicadosLocal.length === 0){
+    tbody.innerHTML = ""; empty.style.display = "block";
+  }else{
+    empty.style.display = "none";
+    tbody.innerHTML = combosAplicadosLocal.map(a => `
+      <tr>
+        <td class="mono">${escapeHtml(a.combo_referencia)} <span class="muted">— ${escapeHtml(a.combo_nombre || "")}</span></td>
+        <td class="num mono">${a.cantidad_combos}</td>
+        <td class="muted">${new Date(a.aplicado_at).toLocaleString('es-CO')}</td>
+        <td><button class="btn btn-danger btn-sm" onclick='revertirCombo(${JSON.stringify(a).replace(/'/g, "&#39;")})'>Revertir</button></td>
+      </tr>
+    `).join("");
+  }
+  document.getElementById("kpi-combos").textContent = combosAplicadosLocal.length;
+}
+
+async function agregarAlConteo(item, cantidad, opciones){
+  opciones = opciones || {};
   const existente = conteoLocal[item.referencia];
   const nuevaCantidad = (existente ? existente.cantidad : 0) + cantidad;
   conteoLocal[item.referencia] = {...item, cantidad: nuevaCantidad};
@@ -904,7 +1012,7 @@ async function agregarAlConteo(item, cantidad){
   }, {onConflict: "lote,referencia"});
 
   if(error){ toast("Guardado local, pero falló al sincronizar: " + error.message, "err"); }
-  else{ toast(item.referencia + " → " + nuevaCantidad); }
+  else if(!opciones.silencioso){ toast(item.referencia + " → " + nuevaCantidad); }
 }
 
 async function actualizarCantidadConteo(referencia, nuevaCantidad){
@@ -949,7 +1057,6 @@ function actualizarKpis(){
   const items = Object.values(conteoLocal);
   document.getElementById("kpi-items").textContent = items.length;
   document.getElementById("kpi-unidades").textContent = items.reduce((a,b)=>a+b.cantidad,0).toLocaleString('es-CO');
-  document.getElementById("kpi-combos").textContent = items.filter(i=>i.es_combo).length;
 }
 
 /* ================== COMPARATIVO ================== */
