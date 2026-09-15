@@ -295,7 +295,11 @@
       <div class="brand-mark">IN</div>
       <div class="brand-text"><b>Inventario</b><span>Escaneo &amp; combos</span></div>
     </div>
-    <button class="nav-btn active" data-view="catalogo">
+    <button class="nav-btn active" data-view="basedatos">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6c0-1.1 3.6-2 8-2s8 .9 8 2-3.6 2-8 2-8-.9-8-2zm0 0v12c0 1.1 3.6 2 8 2s8-.9 8-2V6M4 12c0 1.1 3.6 2 8 2s8-.9 8-2"/></svg>
+      Base de datos
+    </button>
+    <button class="nav-btn" data-view="catalogo" id="nav-catalogo">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
       Catálogo
     </button>
@@ -318,8 +322,61 @@
 
   <main>
 
+    <!-- ============ VISTA BASE DE DATOS ============ -->
+    <div class="view active" id="view-basedatos">
+      <h1>Base de datos de productos</h1>
+      <p class="subhead">Todos los productos que maneja la empresa: código, nombre y código de barras. Esta es la fuente maestra — el catálogo de combos y el escáner del conteo en vivo se alimentan de aquí.</p>
+
+      <div class="panel">
+        <h2>Importar base de datos desde Excel / CSV <span class="tag">columnas: codigo, nombre producto, codigo de barras (opcional)</span></h2>
+        <div class="row">
+          <div class="field grow">
+            <label>Archivo</label>
+            <input type="file" id="file-basedatos" accept=".xlsx,.xls,.csv">
+          </div>
+          <button class="btn btn-primary" id="btn-importar-basedatos">Importar</button>
+        </div>
+        <p class="scan-hint" id="import-basedatos-hint"></p>
+      </div>
+
+      <div class="panel">
+        <h2>Agregar / editar producto individualmente</h2>
+        <div class="row">
+          <div class="field">
+            <label>Código *</label>
+            <input type="text" id="bd-prod-referencia" placeholder="Ej: 309">
+          </div>
+          <div class="field grow">
+            <label>Nombre del producto *</label>
+            <input type="text" id="bd-prod-nombre" placeholder="Nombre del producto">
+          </div>
+          <div class="field">
+            <label>Código de barras</label>
+            <div class="scan-input-wrap" style="max-width:220px;">
+              <input type="text" id="bd-prod-barras" placeholder="Escanear o escribir" style="padding-right:44px;">
+              <button class="btn-camera" id="btn-bd-escanear-camara" title="Escanear con la cámara del celular" style="width:32px;height:32px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8a2 2 0 012-2h1.5l1-1.5h7l1 1.5H18a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V8z"/><circle cx="12" cy="13" r="3.2"/></svg>
+              </button>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="btn-bd-guardar-producto">Guardar producto</button>
+          <button class="btn btn-secondary" id="btn-bd-cancelar-edicion" style="display:none;">Cancelar edición</button>
+        </div>
+        <p class="scan-hint" id="bd-edicion-hint"></p>
+      </div>
+
+      <div class="panel">
+        <h2>Productos en la base de datos <span class="tag" id="count-basedatos"></span></h2>
+        <table>
+          <thead><tr><th>Código</th><th>Nombre del producto</th><th>Código de barras</th><th></th></tr></thead>
+          <tbody id="tbl-basedatos"></tbody>
+        </table>
+        <div class="empty-state" id="basedatos-empty" style="display:none;">Aún no hay productos en la base de datos.</div>
+      </div>
+    </div>
+
     <!-- ============ VISTA CATÁLOGO ============ -->
-    <div class="view active" id="view-catalogo">
+    <div class="view" id="view-catalogo">
       <h1>Catálogo de productos</h1>
       <p class="subhead">Referencias, código de barras y combos. Esta es la base que usa el escáner del conteo en vivo.</p>
 
@@ -355,7 +412,9 @@
             <label for="prod-es-combo">Es combo</label>
           </div>
           <button class="btn btn-primary" id="btn-guardar-producto">Guardar producto</button>
+          <button class="btn btn-secondary" id="btn-cancelar-edicion" style="display:none;">Cancelar edición</button>
         </div>
+        <p class="scan-hint" id="cat-edicion-hint"></p>
 
         <div class="combo-editor" id="combo-editor">
           <div style="font-size:12.5px; color:var(--muted); margin-bottom:8px;">Componentes del combo (referencias existentes)</div>
@@ -416,6 +475,7 @@
           <input type="text" id="lote-conteo-nombre" placeholder="Ej: Conteo-2026-09-12">
         </div>
         <button class="btn btn-secondary" id="btn-cargar-lote-conteo">Cargar / continuar este lote</button>
+        <button class="btn btn-primary" id="btn-nuevo-inventario">+ Comenzar inventario nuevo</button>
       </div>
 
       <div class="scan-box">
@@ -588,9 +648,15 @@ function parseArchivo(file, callback){
 
 function normKey(obj, ...posibles){
   const keys = Object.keys(obj);
+  // 1) coincidencia exacta del nombre de columna
   for(const p of posibles){
     const match = keys.find(k => k.trim().toLowerCase() === p);
-    if(match !== undefined) return obj[match];
+    if(match !== undefined && String(obj[match]).trim() !== "") return obj[match];
+  }
+  // 2) coincidencia parcial (ej: "nombre producto" o "nombre del producto" contienen "nombre")
+  for(const p of posibles){
+    const match = keys.find(k => k.trim().toLowerCase().includes(p));
+    if(match !== undefined && String(obj[match]).trim() !== "") return obj[match];
   }
   return undefined;
 }
@@ -601,6 +667,7 @@ async function cargarProductos(){
   if(error){ toast("Error cargando catálogo: " + error.message, "err"); return; }
   productos = data || [];
   renderProductos();
+  renderBaseDatos();
 }
 
 function renderProductos(){
@@ -617,10 +684,174 @@ function renderProductos(){
       <td>${escapeHtml(p.nombre)}</td>
       <td class="mono">${p.codigo_barras ? escapeHtml(p.codigo_barras) : '<span class="muted">— (combo)</span>'}</td>
       <td>${p.es_combo ? '<span class="pill combo">Combo</span>' : '<span class="pill simple">Simple</span>'}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="eliminarProducto('${p.referencia.replace(/'/g,"\\'")}')">Eliminar</button></td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-secondary btn-sm" onclick="editarProducto('${p.referencia.replace(/'/g,"\\'")}')">Editar</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarProducto('${p.referencia.replace(/'/g,"\\'")}')">Eliminar</button>
+      </td>
     </tr>
   `).join("");
 }
+
+let editandoReferenciaCatalogo = null;
+
+async function editarProducto(referencia){
+  const p = productos.find(x => x.referencia === referencia);
+  if(!p) return;
+  editandoReferenciaCatalogo = referencia;
+
+  document.getElementById("prod-referencia").value = p.referencia;
+  document.getElementById("prod-referencia").disabled = true;
+  document.getElementById("prod-nombre").value = p.nombre || "";
+  document.getElementById("prod-barras").value = p.codigo_barras || "";
+  document.getElementById("prod-es-combo").checked = !!p.es_combo;
+
+  const editor = document.getElementById("combo-editor");
+  document.getElementById("combo-lines").innerHTML = "";
+  if(p.es_combo){
+    editor.classList.add("show");
+    const componentes = await obtenerComponentesCombo(referencia);
+    if(componentes.length === 0){
+      agregarLineaCombo();
+    }else{
+      componentes.forEach(c=>{
+        agregarLineaCombo();
+        const linea = document.getElementById("combo-lines").lastElementChild;
+        linea.querySelector(".combo-item-select").value = c.item_referencia;
+        linea.querySelector(".combo-item-cantidad").value = c.cantidad;
+      });
+    }
+  }else{
+    editor.classList.remove("show");
+  }
+
+  document.getElementById("btn-cancelar-edicion").style.display = "inline-block";
+  document.getElementById("cat-edicion-hint").textContent = "Editando la referencia " + referencia + ". La referencia no se puede cambiar; para eso elimina y crea una nueva.";
+  document.getElementById("btn-guardar-producto").scrollIntoView({behavior:"smooth", block:"center"});
+}
+
+function cancelarEdicionCatalogo(){
+  editandoReferenciaCatalogo = null;
+  document.getElementById("prod-referencia").value = "";
+  document.getElementById("prod-referencia").disabled = false;
+  document.getElementById("prod-nombre").value = "";
+  document.getElementById("prod-barras").value = "";
+  document.getElementById("prod-es-combo").checked = false;
+  document.getElementById("combo-editor").classList.remove("show");
+  document.getElementById("combo-lines").innerHTML = "";
+  document.getElementById("btn-cancelar-edicion").style.display = "none";
+  document.getElementById("cat-edicion-hint").textContent = "";
+}
+
+document.getElementById("btn-cancelar-edicion").addEventListener("click", cancelarEdicionCatalogo);
+
+/* ================== BASE DE DATOS (productos de la empresa) ================== */
+function renderBaseDatos(){
+  const tbody = document.getElementById("tbl-basedatos");
+  const empty = document.getElementById("basedatos-empty");
+  const lista = productos.filter(p => !p.es_combo);
+  document.getElementById("count-basedatos").textContent = "(" + lista.length + ")";
+  if(lista.length === 0){
+    tbody.innerHTML = ""; empty.style.display = "block"; return;
+  }
+  empty.style.display = "none";
+  tbody.innerHTML = lista.map(p => `
+    <tr>
+      <td class="mono">${escapeHtml(p.referencia)}</td>
+      <td>${escapeHtml(p.nombre)}</td>
+      <td class="mono">${p.codigo_barras ? escapeHtml(p.codigo_barras) : '<span class="muted">— sin código</span>'}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-secondary btn-sm" onclick="editarProductoBaseDatos('${p.referencia.replace(/'/g,"\\'")}')">Editar</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarProducto('${p.referencia.replace(/'/g,"\\'")}')">Eliminar</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+let editandoReferenciaBaseDatos = null;
+
+function editarProductoBaseDatos(referencia){
+  const p = productos.find(x => x.referencia === referencia);
+  if(!p) return;
+  editandoReferenciaBaseDatos = referencia;
+  document.getElementById("bd-prod-referencia").value = p.referencia;
+  document.getElementById("bd-prod-referencia").disabled = true;
+  document.getElementById("bd-prod-nombre").value = p.nombre || "";
+  document.getElementById("bd-prod-barras").value = p.codigo_barras || "";
+  document.getElementById("btn-bd-cancelar-edicion").style.display = "inline-block";
+  document.getElementById("bd-edicion-hint").textContent = "Editando el código " + referencia + ". El código no se puede cambiar; para eso elimina y crea uno nuevo.";
+  document.getElementById("btn-bd-guardar-producto").scrollIntoView({behavior:"smooth", block:"center"});
+}
+
+function cancelarEdicionBaseDatos(){
+  editandoReferenciaBaseDatos = null;
+  document.getElementById("bd-prod-referencia").value = "";
+  document.getElementById("bd-prod-referencia").disabled = false;
+  document.getElementById("bd-prod-nombre").value = "";
+  document.getElementById("bd-prod-barras").value = "";
+  document.getElementById("btn-bd-cancelar-edicion").style.display = "none";
+  document.getElementById("bd-edicion-hint").textContent = "";
+}
+
+document.getElementById("btn-bd-cancelar-edicion").addEventListener("click", cancelarEdicionBaseDatos);
+
+document.getElementById("btn-bd-guardar-producto").addEventListener("click", async ()=>{
+  const referencia = document.getElementById("bd-prod-referencia").value.trim();
+  const nombre = document.getElementById("bd-prod-nombre").value.trim();
+  const codigoBarrasRaw = document.getElementById("bd-prod-barras").value.trim();
+
+  if(!referencia || !nombre){
+    toast("Código y nombre son obligatorios", "err"); return;
+  }
+
+  const existente = productos.find(p => p.referencia === referencia);
+  const payload = {
+    referencia,
+    nombre,
+    codigo_barras: codigoBarrasRaw || null,
+    es_combo: existente ? !!existente.es_combo : false
+  };
+
+  const {error} = await sb.from("productos").upsert(payload, {onConflict:"referencia"});
+  if(error){ toast("Error guardando producto: " + error.message, "err"); return; }
+
+  toast("Producto guardado: " + referencia);
+  cancelarEdicionBaseDatos();
+  await cargarProductos();
+  poblarDatalistCombos();
+});
+
+document.getElementById("btn-importar-basedatos").addEventListener("click", ()=>{
+  const file = document.getElementById("file-basedatos").files[0];
+  const hint = document.getElementById("import-basedatos-hint");
+  if(!file){ toast("Selecciona un archivo primero", "err"); return; }
+  parseArchivo(file, async (err, filas)=>{
+    if(err){ toast("No se pudo leer el archivo", "err"); return; }
+    const registros = filas.map(f=>{
+      const referencia = normKey(f, "codigo", "código", "referencia", "ref", "sku");
+      const nombre = normKey(f, "nombre producto", "nombre del producto", "nombre", "descripcion", "descripción", "producto");
+      const barras = normKey(f, "codigo de barras", "código de barras", "codigo_barras", "barras", "ean");
+      if(!referencia) return null;
+      return {
+        referencia: String(referencia).trim(),
+        nombre: nombre ? String(nombre).trim() : String(referencia).trim(),
+        codigo_barras: barras ? String(barras).trim() : null,
+        es_combo: false
+      };
+    }).filter(Boolean);
+
+    if(registros.length === 0){ toast("No se encontraron filas válidas (falta columna 'codigo')", "err"); return; }
+
+    const {error: errImp} = await sb.from("productos").upsert(registros, {onConflict:"referencia"});
+    if(errImp){ hint.textContent = "Error: " + errImp.message; toast("Error importando la base de datos", "err"); return; }
+    hint.textContent = registros.length + " productos importados correctamente.";
+    toast(registros.length + " productos importados a la base de datos");
+    document.getElementById("file-basedatos").value = "";
+    await cargarProductos();
+    poblarDatalistCombos();
+  });
+});
+
+document.getElementById("btn-bd-escanear-camara").addEventListener("click", ()=> abrirModalCamara("bd-prod-barras"));
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -690,12 +921,7 @@ document.getElementById("btn-guardar-producto").addEventListener("click", async 
   }
 
   toast("Producto guardado: " + referencia);
-  document.getElementById("prod-referencia").value = "";
-  document.getElementById("prod-nombre").value = "";
-  document.getElementById("prod-barras").value = "";
-  document.getElementById("prod-es-combo").checked = false;
-  document.getElementById("combo-editor").classList.remove("show");
-  document.getElementById("combo-lines").innerHTML = "";
+  cancelarEdicionCatalogo();
   await cargarProductos();
   poblarDatalistCombos();
 });
@@ -705,6 +931,7 @@ async function eliminarProducto(referencia){
   await sb.from("combo_componentes").delete().eq("combo_referencia", referencia);
   const {error} = await sb.from("productos").delete().eq("referencia", referencia);
   if(error){ toast("Error eliminando: " + error.message, "err"); return; }
+  if(editandoReferenciaCatalogo === referencia) cancelarEdicionCatalogo();
   toast("Producto eliminado");
   await cargarProductos();
   poblarDatalistCombos();
@@ -835,6 +1062,25 @@ document.getElementById("btn-cargar-lote-conteo").addEventListener("click", asyn
   renderConteo();
   await cargarCombosAplicados(lote);
   toast("Lote \"" + lote + "\" listo (" + (data ? data.length : 0) + " ítems previos)");
+  document.getElementById("input-scan").focus();
+});
+
+document.getElementById("btn-nuevo-inventario").addEventListener("click", async ()=>{
+  if(loteConteoActivo && Object.keys(conteoLocal).length > 0){
+    if(!confirm("Ya tienes un conteo en curso en el lote \"" + loteConteoActivo + "\" (queda guardado). ¿Comenzar un inventario nuevo con un lote distinto?")) return;
+  }
+  const ahora = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const nombreSugerido = "Conteo-" + ahora.getFullYear() + "-" + pad(ahora.getMonth()+1) + "-" + pad(ahora.getDate()) + "-" + pad(ahora.getHours()) + pad(ahora.getMinutes());
+
+  document.getElementById("lote-conteo-nombre").value = nombreSugerido;
+  loteConteoActivo = nombreSugerido;
+  document.getElementById("lote-conteo-actual").textContent = nombreSugerido;
+  conteoLocal = {};
+  combosAplicadosLocal = [];
+  renderConteo();
+  renderCombosAplicados();
+  toast("Inventario nuevo iniciado: \"" + nombreSugerido + "\"");
   document.getElementById("input-scan").focus();
 });
 
@@ -1153,8 +1399,11 @@ document.getElementById("btn-exportar-comparativo").addEventListener("click", ()
 /* ================== ESCANEO CON CÁMARA ================== */
 let zxingReader = null;
 let camaraActiva = false;
+let camaraStreamPermiso = null;
+let camaraTargetInputId = "input-scan"; // a qué input se escribe el código detectado
 
-function abrirModalCamara(){
+function abrirModalCamara(targetInputId){
+  camaraTargetInputId = targetInputId || "input-scan";
   document.getElementById("camera-modal").classList.add("show");
   document.getElementById("camera-status").textContent = "Iniciando cámara…";
   iniciarEscaneoCamara();
@@ -1170,19 +1419,55 @@ function detenerCamara(){
   if(zxingReader){
     try{ zxingReader.reset(); }catch(e){}
   }
+  if(camaraStreamPermiso){
+    try{ camaraStreamPermiso.getTracks().forEach(t=>t.stop()); }catch(e){}
+    camaraStreamPermiso = null;
+  }
 }
 
 async function iniciarEscaneoCamara(){
+  const statusEl = document.getElementById("camera-status");
+
+  // La cámara solo funciona en un "contexto seguro" (HTTPS o localhost).
+  if(!window.isSecureContext){
+    statusEl.textContent = "Este sitio no está en HTTPS: el navegador bloquea la cámara por seguridad. Abre la app desde una dirección https:// para poder escanear.";
+    toast("La cámara requiere que la app se abra por HTTPS", "err");
+    return;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    statusEl.textContent = "Este navegador no soporta acceso a la cámara.";
+    toast("Este navegador no soporta cámara", "err");
+    return;
+  }
   if(typeof ZXing === "undefined"){
-    document.getElementById("camera-status").textContent = "No se pudo cargar el módulo de cámara.";
+    statusEl.textContent = "No se pudo cargar el módulo de cámara.";
     toast("No se pudo cargar el módulo de escaneo por cámara", "err");
     return;
   }
   if(!zxingReader){
     zxingReader = new ZXing.BrowserMultiFormatReader();
   }
-  const statusEl = document.getElementById("camera-status");
   const select = document.getElementById("camera-device-select");
+
+  // Pedimos permiso explícitamente antes de enumerar dispositivos.
+  // Sin este paso, en muchos navegadores (sobre todo celulares) listVideoInputDevices()
+  // devuelve la lista sin etiquetas o falla con "sin autorización" aunque el usuario
+  // vaya a aceptar el permiso.
+  try{
+    camaraStreamPermiso = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+  }catch(errPermiso){
+    if(errPermiso && (errPermiso.name === "NotAllowedError" || errPermiso.name === "PermissionDeniedError")){
+      statusEl.textContent = "Permiso de cámara denegado. Ve a la configuración del navegador/sitio y permite el acceso a la cámara para esta página, luego inténtalo de nuevo.";
+      toast("Permiso de cámara denegado", "err");
+    }else if(errPermiso && errPermiso.name === "NotFoundError"){
+      statusEl.textContent = "No se encontró ninguna cámara en este dispositivo.";
+      toast("No se encontró cámara", "err");
+    }else{
+      statusEl.textContent = "No se pudo acceder a la cámara: " + (errPermiso && errPermiso.message ? errPermiso.message : "sin autorización");
+      toast("No se pudo acceder a la cámara", "err");
+    }
+    return;
+  }
 
   try{
     const dispositivos = await ZXing.BrowserCodeReader.listVideoInputDevices();
@@ -1217,15 +1502,20 @@ function lanzarDecodificacion(deviceId){
     if(result){
       const codigo = result.getText();
       statusEl.textContent = "Código detectado: " + codigo;
-      document.getElementById("input-scan").value = codigo;
+      const targetInput = document.getElementById(camaraTargetInputId);
+      if(targetInput) targetInput.value = codigo;
       cerrarModalCamara();
-      buscarPorCodigoBarras(codigo);
+      if(camaraTargetInputId === "input-scan"){
+        buscarPorCodigoBarras(codigo);
+      }else{
+        toast("Código detectado: " + codigo);
+      }
     }
     // NotFoundException se dispara continuamente mientras no hay lectura; se ignora.
   });
 }
 
-document.getElementById("btn-abrir-camara").addEventListener("click", abrirModalCamara);
+document.getElementById("btn-abrir-camara").addEventListener("click", ()=> abrirModalCamara("input-scan"));
 document.getElementById("btn-cerrar-camara").addEventListener("click", cerrarModalCamara);
 document.getElementById("btn-cerrar-camara-2").addEventListener("click", cerrarModalCamara);
 
