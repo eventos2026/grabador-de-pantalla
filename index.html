@@ -1455,6 +1455,13 @@ async function iniciarEscaneoCamara(){
   // vaya a aceptar el permiso.
   try{
     camaraStreamPermiso = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+    // Ya cumplió su propósito (conceder el permiso y revelar los labels de las cámaras).
+    // Hay que soltarla YA: si la dejamos abierta, ZXing no puede abrir su propio stream
+    // sobre la misma cámara y el navegador lo reporta como "sin autorización".
+    camaraStreamPermiso.getTracks().forEach(t=>t.stop());
+    camaraStreamPermiso = null;
+    // Pequeña pausa para que el navegador libere realmente la cámara antes de que ZXing la reabra.
+    await new Promise(r => setTimeout(r, 200));
   }catch(errPermiso){
     if(errPermiso && (errPermiso.name === "NotAllowedError" || errPermiso.name === "PermissionDeniedError")){
       statusEl.textContent = "Permiso de cámara denegado. Ve a la configuración del navegador/sitio y permite el acceso a la cámara para esta página, luego inténtalo de nuevo.";
