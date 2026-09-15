@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Inventario · Escaneo y Combos</title>
+
+<!-- PWA: permite instalar la app en el celular (no solo crear un acceso directo) -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#12161d">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Inventario">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -1427,6 +1438,7 @@ function detenerCamara(){
 
 async function iniciarEscaneoCamara(){
   const statusEl = document.getElementById("camera-status");
+  const select = document.getElementById("camera-device-select");
 
   // La cámara solo funciona en un "contexto seguro" (HTTPS o localhost).
   if(!window.isSecureContext){
@@ -1447,59 +1459,73 @@ async function iniciarEscaneoCamara(){
   if(!zxingReader){
     zxingReader = new ZXing.BrowserMultiFormatReader();
   }
-  const select = document.getElementById("camera-device-select");
 
-  // Pedimos permiso explícitamente antes de enumerar dispositivos.
-  // Sin este paso, en muchos navegadores (sobre todo celulares) listVideoInputDevices()
-  // devuelve la lista sin etiquetas o falla con "sin autorización" aunque el usuario
-  // vaya a aceptar el permiso.
+  function manejarResultado(result){
+    if(!camaraActiva) return;
+    if(result){
+      const codigo = result.getText();
+      statusEl.textContent = "Código detectado: " + codigo;
+      const targetInput = document.getElementById(camaraTargetInputId);
+      if(targetInput) targetInput.value = codigo;
+      cerrarModalCamara();
+      if(camaraTargetInputId === "input-scan"){
+        buscarPorCodigoBarras(codigo);
+      }else{
+        toast("Código detectado: " + codigo);
+      }
+    }
+    // NotFoundException se dispara continuamente mientras no hay lectura; se ignora.
+  }
+
   try{
-    camaraStreamPermiso = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
-    // Ya cumplió su propósito (conceder el permiso y revelar los labels de las cámaras).
-    // Hay que soltarla YA: si la dejamos abierta, ZXing no puede abrir su propio stream
-    // sobre la misma cámara y el navegador lo reporta como "sin autorización".
-    camaraStreamPermiso.getTracks().forEach(t=>t.stop());
-    camaraStreamPermiso = null;
-    // Pequeña pausa para que el navegador libere realmente la cámara antes de que ZXing la reabra.
-    await new Promise(r => setTimeout(r, 200));
-  }catch(errPermiso){
-    if(errPermiso && (errPermiso.name === "NotAllowedError" || errPermiso.name === "PermissionDeniedError")){
+    zxingReader.reset();
+    camaraActiva = true;
+    statusEl.textContent = "Abriendo la cámara trasera…";
+
+    // Pedimos directamente la cámara trasera con facingMode "environment" (ideal, no "exact",
+    // para que igual funcione si el celular solo tiene una cámara). Esto pide el permiso
+    // Y abre la cámara correcta en un solo paso — pedir permiso aparte y luego abrir otro
+    // stream distinto es lo que antes provocaba el error de "sin autorización".
+    await zxingReader.decodeFromConstraints(
+      {audio:false, video:{facingMode:{ideal:"environment"}}},
+      "camera-video",
+      (result)=> manejarResultado(result)
+    );
+    statusEl.textContent = "Apunta la cámara trasera al código de barras…";
+  }catch(err){
+    camaraActiva = false;
+    if(err && (err.name === "NotAllowedError" || err.name === "PermissionDeniedError")){
       statusEl.textContent = "Permiso de cámara denegado. Ve a la configuración del navegador/sitio y permite el acceso a la cámara para esta página, luego inténtalo de nuevo.";
       toast("Permiso de cámara denegado", "err");
-    }else if(errPermiso && errPermiso.name === "NotFoundError"){
+    }else if(err && err.name === "NotFoundError"){
       statusEl.textContent = "No se encontró ninguna cámara en este dispositivo.";
       toast("No se encontró cámara", "err");
+    }else if(err && err.name === "NotReadableError"){
+      statusEl.textContent = "La cámara está siendo usada por otra app o pestaña. Ciérrala e inténtalo de nuevo.";
+      toast("La cámara está ocupada", "err");
     }else{
-      statusEl.textContent = "No se pudo acceder a la cámara: " + (errPermiso && errPermiso.message ? errPermiso.message : "sin autorización");
+      statusEl.textContent = "No se pudo acceder a la cámara: " + (err && err.message ? err.message : "sin autorización");
       toast("No se pudo acceder a la cámara", "err");
     }
     return;
   }
 
+  // Ya con permiso concedido, listamos las cámaras reales para permitir cambiar
+  // manualmente (útil en celulares con varias lentes traseras, por ejemplo).
   try{
     const dispositivos = await ZXing.BrowserCodeReader.listVideoInputDevices();
-    if(!dispositivos || dispositivos.length === 0){
-      statusEl.textContent = "No se encontró ninguna cámara en este dispositivo.";
-      toast("No se encontró cámara", "err");
-      return;
+    if(dispositivos && dispositivos.length){
+      select.innerHTML = dispositivos.map((d,i)=>`<option value="${d.deviceId}">${d.label || ("Cámara " + (i+1))}</option>`).join("");
+      const trasera = dispositivos.find(d => /back|trasera|rear|environment/i.test(d.label));
+      select.value = trasera ? trasera.deviceId : dispositivos[dispositivos.length - 1].deviceId;
+      select.onchange = ()=> lanzarDecodificacionPorDeviceId(select.value);
     }
-    select.innerHTML = dispositivos.map((d,i)=>`<option value="${d.deviceId}">${d.label || ("Cámara " + (i+1))}</option>`).join("");
-
-    // Preferir cámara trasera si el label lo indica
-    const trasera = dispositivos.find(d => /back|trasera|rear|environment/i.test(d.label));
-    const deviceIdInicial = trasera ? trasera.deviceId : dispositivos[dispositivos.length - 1].deviceId;
-    select.value = deviceIdInicial;
-
-    lanzarDecodificacion(deviceIdInicial);
-
-    select.onchange = ()=> lanzarDecodificacion(select.value);
-  }catch(err){
-    statusEl.textContent = "No se pudo acceder a la cámara: permiso denegado o no disponible.";
-    toast("No se pudo acceder a la cámara", "err");
+  }catch(e){
+    // No es crítico: ya está escaneando con la cámara trasera por defecto.
   }
 }
 
-function lanzarDecodificacion(deviceId){
+function lanzarDecodificacionPorDeviceId(deviceId){
   const statusEl = document.getElementById("camera-status");
   camaraActiva = true;
   statusEl.textContent = "Apunta la cámara al código de barras…";
@@ -1518,7 +1544,6 @@ function lanzarDecodificacion(deviceId){
         toast("Código detectado: " + codigo);
       }
     }
-    // NotFoundException se dispara continuamente mientras no hay lectura; se ignora.
   });
 }
 
@@ -1536,6 +1561,17 @@ document.getElementById("btn-cerrar-camara-2").addEventListener("click", cerrarM
     toast("No se pudo conectar a Supabase. Revisa que las tablas existan.", "err");
   }
 })();
+
+/* ================== PWA: registrar service worker ================== */
+if("serviceWorker" in navigator){
+  window.addEventListener("load", ()=>{
+    navigator.serviceWorker.register("sw.js").catch(()=>{
+      // Si falla (por ejemplo, abierto como archivo local sin servidor), no es crítico:
+      // la app sigue funcionando, solo no se podrá instalar como PWA.
+    });
+  });
+}
+
 </script>
 </body>
 </html>
